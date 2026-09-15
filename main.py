@@ -104,13 +104,29 @@ def relevant(n):
 def g2b():
     key=os.getenv('G2B_SERVICE_KEY','').strip()
     if not key: return []
+
     base='https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc'
-    now=datetime.now(); start=now-timedelta(days=int(os.getenv('LOOKBACK_DAYS','3')))
+    url=f'{base}?serviceKey={key}'
+
+    now=datetime.now()
+    start=now-timedelta(days=int(os.getenv('LOOKBACK_DAYS','3')))
     out=[]
+
     for page in range(1,int(os.getenv('MAX_PAGES','20'))+1):
-        p={'serviceKey':key,'type':'json','inqryDiv':'1','inqryBgnDt':start.strftime('%Y%m%d%H%M'),'inqryEndDt':now.strftime('%Y%m%d%H%M'),'numOfRows':100,'pageNo':page}
-        r=get_with_retry(base,params=p); body=r.json().get('response',{}).get('body',{})
-        items=body.get('items') or []; items=items.get('item') if isinstance(items,dict) else items
+        p={
+            'type':'json',
+            'inqryDiv':'1',
+            'inqryBgnDt':start.strftime('%Y%m%d%H%M'),
+            'inqryEndDt':now.strftime('%Y%m%d%H%M'),
+            'numOfRows':100,
+            'pageNo':page
+        }
+
+        r=get_with_retry(url,params=p)
+        body=r.json().get('response',{}).get('body',{})
+
+        items=body.get('items') or []
+        items=items.get('item') if isinstance(items,dict) else items
         if not items: break
         for x in items:
             title=clean(x.get('bidNtceNm')); 
