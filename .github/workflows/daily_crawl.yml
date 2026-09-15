@@ -16,7 +16,7 @@ jobs:
       TZ: Asia/Seoul
       DRY_RUN: "false"
       LOOKBACK_DAYS: "258"
-      MAX_PAGES: "100"
+      MAX_PAGES: "10"
       TARGET_YEAR: "2026"
       REQUEST_TIMEOUT: "30"
       LOG_LEVEL: INFO
