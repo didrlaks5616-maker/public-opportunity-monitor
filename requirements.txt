@@ -1,0 +1,6 @@
+requests>=2.32,<3
+python-dotenv>=1.0,<2
+beautifulsoup4>=4.12,<5
+pypdf>=5.0,<7
+pytest>=8.0,<9
+PyYAML>=6.0,<7
