@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, re, json, hashlib, logging
+import os, re, json, hashlib, logging, time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
@@ -28,7 +28,57 @@ def parse_date(v):
     return f'{m.group(1)}-{m.group(2)}-{m.group(3)}' if m else ''
 def hash_text(s): return hashlib.sha256(clean(s).encode()).hexdigest()
 def unique_key(n): return '|'.join([n.source, n.bid_number or n.source_id or '', clean(n.organization), clean(n.title), n.deadline or ''])
+def get_with_retry(url, params=None, attempts=4):
+    last_error = None
 
+    for attempt in range(1, attempts + 1):
+        try:
+            r = requests.get(
+                url,
+                params=params,
+                timeout=(15, 60),
+            )
+
+            if r.status_code in {429, 500, 502, 503, 504}:
+                raise requests.exceptions.HTTPError(
+                    f'temporary HTTP {r.status_code}',
+                    response=r,
+                )
+
+            r.raise_for_status()
+            return r
+
+        except (
+            requests.exceptions.ConnectTimeout,
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.HTTPError,
+        ) as e:
+
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+
+            # 403 같은 실제 권한 오류는 재시도하지 않음
+            if status is not None and status not in {429, 500, 502, 503, 504}:
+                raise
+
+            last_error = e
+
+            if attempt == attempts:
+                raise
+
+            wait = 5 * (2 ** (attempt - 1))
+
+            log.warning(
+                'temporary network error (%s/%s): %s - retry in %ss',
+                attempt,
+                attempts,
+                e,
+                wait,
+            )
+
+            time.sleep(wait)
+
+    raise last_error
 def score_notice(n):
     text=(n.title+' '+n.description+' '+n.raw_text).lower(); hits=[k for k in KEYWORDS if k.lower() in text]
     score=min(100,len(hits)*4)
@@ -53,7 +103,7 @@ def g2b():
     out=[]
     for page in range(1,int(os.getenv('MAX_PAGES','20'))+1):
         p={'serviceKey':key,'type':'json','inqryDiv':'1','inqryBgnDt':start.strftime('%Y%m%d%H%M'),'inqryEndDt':now.strftime('%Y%m%d%H%M'),'numOfRows':100,'pageNo':page}
-        r=requests.get(base,params=p,timeout=30); r.raise_for_status(); body=r.json().get('response',{}).get('body',{})
+       r=get_with_retry(base,params=p); body=r.json().get('response',{}).get('body',{})
         items=body.get('items') or []; items=items.get('item') if isinstance(items,dict) else items
         if not items: break
         for x in items:
@@ -70,7 +120,7 @@ def bizinfo():
     if not key: return []
     url=os.getenv('BIZINFO_API_URL','https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do')
     p={'crtfcKey':key,'dataType':'json','searchCnt':100}
-    r=requests.get(url,params=p,timeout=30); r.raise_for_status(); data=r.json() if 'json' in r.headers.get('content-type','') else json.loads(r.text)
+    r=get_with_retry(url,params=p); data=r.json() if 'json' in r.headers.get('content-type','') else json.loads(r.text)
     items=data.get('jsonArray') or data.get('items') or data.get('data') or []
     if isinstance(items,dict): items=items.get('item') or []
     out=[]
