@@ -103,7 +103,7 @@ def g2b():
     out=[]
     for page in range(1,int(os.getenv('MAX_PAGES','20'))+1):
         p={'serviceKey':key,'type':'json','inqryDiv':'1','inqryBgnDt':start.strftime('%Y%m%d%H%M'),'inqryEndDt':now.strftime('%Y%m%d%H%M'),'numOfRows':100,'pageNo':page}
-       r=get_with_retry(base,params=p); body=r.json().get('response',{}).get('body',{})
+        r=get_with_retry(base,params=p); body=r.json().get('response',{}).get('body',{})
         items=body.get('items') or []; items=items.get('item') if isinstance(items,dict) else items
         if not items: break
         for x in items:
