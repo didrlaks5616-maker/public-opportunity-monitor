@@ -2,7 +2,9 @@ name: Public Opportunity Monitor
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    # 조달청 Open API 이용 가능시간(18:00~익일 08:30 KST) 안에서 실행
+    # 09:10 UTC = 18:10 KST
+    - cron: "10 9 * * *"
   workflow_dispatch:
 
 permissions:
@@ -11,7 +13,7 @@ permissions:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       TZ: Asia/Seoul
       DRY_RUN: "false"
