@@ -15,8 +15,9 @@ jobs:
     env:
       TZ: Asia/Seoul
       DRY_RUN: "false"
-      LOOKBACK_DAYS: "3"
-      MAX_PAGES: "20"
+      LOOKBACK_DAYS: "258"
+      MAX_PAGES: "100"
+      TARGET_YEAR: "2026"
       REQUEST_TIMEOUT: "30"
       LOG_LEVEL: INFO
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
