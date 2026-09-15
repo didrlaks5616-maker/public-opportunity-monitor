@@ -45,9 +45,15 @@ def get_with_retry(url, params=None, attempts=4):
                     response=r,
                 )
 
+            if not r.ok:
+                log.error(
+                   'HTTP error status=%s body=%r',
+                   r.status_code,
+                   r.text[:1500],
+                )
+
             r.raise_for_status()
             return r
-
         except (
             requests.exceptions.ConnectTimeout,
             requests.exceptions.ReadTimeout,
@@ -96,7 +102,7 @@ def relevant(n):
     return (s>=8 or mixed) and (not hard_excluded or mixed and n.notice_type=='BID')
 
 def g2b():
-    key=os.getenv('G2B_SERVICE_KEY','')
+    key=os.getenv('G2B_SERVICE_KEY','').strip()
     if not key: return []
     base='https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc'
     now=datetime.now(); start=now-timedelta(days=int(os.getenv('LOOKBACK_DAYS','3')))
