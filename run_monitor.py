@@ -37,26 +37,23 @@ SESSION = build_session()
 
 
 def robust_get_with_retry(url, params=None, attempts=2):
-    safe_url = url.split("?", 1)[0]
+    host = url.split("/", 3)[2] if "://" in url else "unknown"
     for attempt in range(1, attempts + 1):
         try:
             response = SESSION.get(url, params=params, timeout=(20, 60))
-            if response.status_code in {401, 403, 404}:
-                response.raise_for_status()
             response.raise_for_status()
             return response
         except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout,
                 requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in {401, 403, 404}:
-                raise
+                raise RuntimeError(f"request failed host={host} reason=HTTP_{status}") from None
             if attempt == attempts:
-                log.error("REQUEST FAILED host=%s attempts=%s reason=%s", safe_url.split("/", 3)[2], attempt, type(exc).__name__)
-                raise
+                raise RuntimeError(f"request failed host={host} reason={type(exc).__name__}") from None
             wait = min(2 ** (attempt - 1), 15)
-            log.warning("REQUEST RETRY host=%s attempt=%s/%s reason=%s wait=%ss", safe_url.split("/", 3)[2], attempt, attempts, type(exc).__name__, wait)
+            log.warning("REQUEST RETRY host=%s attempt=%s/%s reason=%s wait=%ss", host, attempt, attempts, type(exc).__name__, wait)
             time.sleep(wait)
-    raise RuntimeError("unreachable")
+    raise RuntimeError("request failed")
 
 
 def normalize_g2b_service_key() -> None:
