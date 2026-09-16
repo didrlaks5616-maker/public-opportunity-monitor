@@ -23,7 +23,6 @@ def check_g2b() -> None:
     key = normalize_key(raw)
     url = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc"
     params = {
-        "serviceKey": key,
         "type": "json",
         "inqryDiv": "1",
         "inqryBgnDt": "202609160000",
@@ -32,7 +31,7 @@ def check_g2b() -> None:
         "pageNo": 1,
     }
     try:
-        r = requests.get(url, params=params, timeout=(20, 60))
+        r = requests.get(f"{url}?serviceKey={key}", params=params, timeout=(20, 60))
         r.raise_for_status()
         payload = r.json()
         body = payload.get("response", {}).get("body", {})
