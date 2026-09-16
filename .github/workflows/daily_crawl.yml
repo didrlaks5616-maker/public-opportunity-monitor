@@ -44,7 +44,7 @@ jobs:
       MAX_PAGES: ${{ inputs.MAX_PAGES || '10' }}
       TARGET_YEAR: "2026"
       LOG_LEVEL: INFO
-      NOTION_WORKERS: "3"
+      NOTION_WORKERS: "1"
       DRY_RUN_SAMPLE: "30"
       G2B_KINDS: "용역,공사,물품"
       ALLOW_G2B_OFF_HOURS: "true"
@@ -75,5 +75,6 @@ jobs:
           echo "MAX_PAGES=$MAX_PAGES"
           echo "G2B_KINDS=$G2B_KINDS"
           echo "ALLOW_G2B_OFF_HOURS=$ALLOW_G2B_OFF_HOURS"
+          echo "NOTION_WORKERS=$NOTION_WORKERS"
       - name: Run monitor
         run: python run_monitor.py
