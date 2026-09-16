@@ -24,7 +24,7 @@ jobs:
       LOG_LEVEL: INFO
       NOTION_WORKERS: "1"
       DRY_RUN_SAMPLE: "10"
-      G2B_KINDS: "용역,공사,물품"
+      G2B_KINDS: "용역"
       ALLOW_G2B_OFF_HOURS: "true"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
@@ -42,5 +42,5 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Run limited live pipeline across all G2B operation types
+      - name: Run limited live pipeline for services only
         run: python run_monitor.py
