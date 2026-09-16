@@ -2,7 +2,7 @@ name: Public Opportunity Monitor
 
 on:
   schedule:
-    - cron: "10 9 * * *"
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       RUN_MODE:
