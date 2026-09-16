@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -20,9 +20,10 @@ KST = timezone(timedelta(hours=9))
 NEW_NOTION_DATA_SOURCE_ID = "03343ce8-cb69-4a15-bfd1-6b8050b91ed1"
 OLD_NOTION_DATA_SOURCE_ID = "99b9dd7c-d1da-4429-8caa-f13ff86c77d6"
 
-KEYWORDS = """마케팅 마케팅대행 마케팅운영 마케팅용역 온라인마케팅 디지털마케팅 통합마케팅 해외마케팅 지역마케팅 관광마케팅 브랜드마케팅 홍보 홍보대행 홍보용역 홍보운영 온라인홍보 정책홍보 사업홍보 언론홍보 홍보전략 PR 광고 광고대행 광고운영 광고용역 온라인광고 디지털광고 검색광고 SNS광고 미디어광고 옥외광고 매체광고 광고캠페인 SNS 소셜미디어 유튜브 인스타그램 블로그 페이스북 숏폼 릴스 틱톡 채널운영 SNS운영 SNS콘텐츠 온라인채널 콘텐츠 콘텐츠제작 홍보콘텐츠 영상콘텐츠 영상제작 홍보영상 브랜드영상 유튜브콘텐츠 숏폼콘텐츠 사진촬영 디자인 그래픽디자인 상세페이지 카탈로그 브로슈어 홍보물 인쇄물 브랜드 브랜딩 브랜드개발 BI CI 네이밍 브랜드전략 브랜드홍보 행사 행사대행 행사운영 행사기획 이벤트 이벤트대행 축제 축제운영 축제대행 페스티벌 포럼 컨퍼런스 세미나 설명회 네트워킹 데모데이 쇼케이스 개막식 기념식 전시 전시회 박람회 페어 엑스포 전시운영 박람회운영 공동관 홍보관 전시관 부스 부스운영 부스설치 전시기획 공간기획 판촉 프로모션 캠페인 기획전 판매전 특판전 판촉전 품평회 팝업 팝업스토어 라이브커머스 체험행사 인플루언서 크리에이터 체험단 서포터즈 기자단 홍보단 앰배서더 관광홍보 관광마케팅 지역홍보 지역브랜딩 지역축제 관광콘텐츠 관광상품 지역활성화 상권활성화 용역 입찰 입찰공고 제안요청서 RFP 제안서 제안서평가 사업자선정 수행기관 수행업체 운영업체 대행사 협력업체 계약 협상에의한계약 일반경쟁 제한경쟁 지명경쟁 전자입찰 나라장터 사전규격 긴급입찰 재공고 입찰참가 입찰참가자격""".split()
+KEYWORDS = """마케팅 마케팅대행 마케팅운영 마케팅용역 온라인마케팅 디지털마케팅 통합마케팅 해외마케팅 지역마케팅 관광마케팅 브랜드마케팅 홍보 홍보대행 홍보용역 홍보운영 온라인홍보 정책홍보 사업홍보 언론홍보 홍보전략 PR 광고 광고대행 광고운영 광고용역 온라인광고 디지털광고 검색광고 SNS광고 미디어광고 옥외광고 매체광고 광고캠페인 SNS 소셜미디어 유튜브 인스타그램 블로그 페이스북 숏폼 릴스 틱톡 채널운영 SNS운영 SNS콘텐츠 콘텐츠 콘텐츠제작 홍보콘텐츠 영상콘텐츠 영상제작 홍보영상 브랜드영상 유튜브콘텐츠 숏폼콘텐츠 사진촬영 디자인 그래픽디자인 상세페이지 카탈로그 브로슈어 홍보물 인쇄물 브랜드 브랜딩 브랜드개발 BI CI 네이밍 브랜드전략 브랜드홍보 행사 행사대행 행사운영 행사기획 이벤트 이벤트대행 축제 축제운영 축제대행 페스티벌 포럼 컨퍼런스 세미나 설명회 네트워킹 데모데이 쇼케이스 개막식 기념식 전시 전시회 박람회 페어 엑스포 전시운영 박람회운영 공동관 홍보관 전시관 부스 부스운영 부스설치 전시기획 공간기획 판촉 프로모션 캠페인 기획전 판매전 특판전 판촉전 품평회 팝업 팝업스토어 라이브커머스 체험행사 인플루언서 크리에이터 체험단 서포터즈 기자단 홍보단 앰배서더 관광홍보 관광마케팅 지역홍보 지역브랜딩 지역축제 관광콘텐츠 관광상품 지역활성화 상권활성화 용역 입찰 입찰공고 제안요청서 RFP 제안서 제안서평가 사업자선정 수행기관 수행업체 운영업체 대행사 협력업체 계약 협상에의한계약 일반경쟁 제한경쟁 지명경쟁 전자입찰""".split()
 EXCLUDE = """직원채용 공무원채용 기간제근로자 인사 부동산매각 토목공사 건축공사 전기공사 기계설비 시설보수 단순물품구매 차량구매 사무용품구매 급식 경비 청소 폐기물처리 의료장비 건설자재""".split()
 BID_TERMS = "용역 입찰 입찰공고 제안요청서 RFP 제안서 사업자선정 수행업체 운영업체 대행사 협상에의한계약 일반경쟁 제한경쟁 전자입찰".split()
+INTENT_TERMS = "기획 운영 대행 제작 개발 조성 개선 홍보 마케팅 브랜딩 브랜드 디자인 행사 전시 축제 박람회 공간 인테리어 실내건축 리모델링 콘텐츠 광고 영상 SNS 관광 팝업".split()
 
 CATEGORY_KEYWORDS = {
     "인테리어": "인테리어 실내건축 리모델링 시설개선 환경개선 공간조성 매장 점포 노후점포 개보수 내부공사".split(),
@@ -61,10 +62,8 @@ class Notice:
     unique_key: str = ""
 
     def __post_init__(self):
-        if self.fields is None:
-            self.fields = []
-        if self.discovered_keywords is None:
-            self.discovered_keywords = []
+        self.fields = self.fields or []
+        self.discovered_keywords = self.discovered_keywords or []
 
 
 def clean(value) -> str:
@@ -83,10 +82,6 @@ def parse_budget(value) -> float | None:
         return None
     numeric = re.search(r"-?\d+(?:\.\d+)?", text)
     return float(numeric.group(0)) if numeric else None
-
-
-def hash_text(value: str) -> str:
-    return hashlib.sha256(clean(value).encode("utf-8")).hexdigest()
 
 
 def classify_fields(text: str) -> list[str]:
@@ -116,9 +111,11 @@ def set_relevance(notice: Notice) -> None:
     hard_excluded = any(word.lower() in title_lower for word in EXCLUDE)
     if hard_excluded and notice.notice_type == "지원사업":
         notice.relevance = "제외"
-    elif score >= 30:
+        return
+    intent = any(term.lower() in (notice.title + " " + notice.raw_text).lower() for term in INTENT_TERMS)
+    if score >= 30:
         notice.relevance = "직접"
-    elif score >= 12:
+    elif score >= 12 or (score >= 8 and intent):
         notice.relevance = "관련"
     else:
         notice.relevance = "낮음"
@@ -126,11 +123,7 @@ def set_relevance(notice: Notice) -> None:
 
 def is_relevant(notice: Notice) -> bool:
     set_relevance(notice)
-    if notice.relevance == "제외":
-        return False
-    text = clean(f"{notice.title} {notice.organization} {notice.raw_text}").lower()
-    mixed = any(k in text for k in ["홍보", "마케팅", "행사", "축제", "콘텐츠", "광고", "전시", "박람회", "브랜드", "sns", "공간", "인테리어", "디자인", "실내건축", "리모델링"])
-    return notice.relevance in {"직접", "관련"} or mixed
+    return notice.relevance in {"직접", "관련"}
 
 
 def unique_key(notice: Notice) -> str:
@@ -160,14 +153,15 @@ def get_with_retry(url, params=None, attempts=4):
 
 
 def g2b_windows() -> list[tuple[datetime, datetime]]:
-    target_year = os.getenv("TARGET_YEAR", "2026").strip()
+    mode = os.getenv("RUN_MODE", "daily").strip().lower()
     now = datetime.now(KST).replace(tzinfo=None)
-    if target_year.isdigit() and len(target_year) == 4:
-        start = datetime(int(target_year), 1, 1)
+    if mode == "initial":
+        start = datetime(int(os.getenv("TARGET_YEAR", "2026")), 1, 1)
     else:
-        start = now - timedelta(days=int(os.getenv("LOOKBACK_DAYS", "7")))
+        days = max(1, int(os.getenv("LOOKBACK_DAYS", "3")))
+        start = now - timedelta(days=days)
     if start > now:
-        start = now - timedelta(days=7)
+        start = now - timedelta(days=3)
     windows = []
     cursor = start
     while cursor <= now:
@@ -183,14 +177,23 @@ def g2b() -> list[Notice]:
         log.warning("G2B_SERVICE_KEY is missing")
         return []
     base_url = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-    max_pages = int(os.getenv("MAX_PAGES", "10"))
-    kinds = [x.strip() for x in os.getenv("G2B_KINDS", "용역,공사,물품").split(",") if x.strip() in G2B_OPERATIONS]
+    max_pages = max(1, int(os.getenv("MAX_PAGES", "10")))
+    configured_kinds = os.getenv("G2B_KINDS", "용역,공사,물품")
+    kinds = [x.strip() for x in configured_kinds.split(",") if x.strip() in G2B_OPERATIONS]
     out: list[Notice] = []
     for kind in kinds:
         operation = G2B_OPERATIONS[kind]
         for window_start, window_end in g2b_windows():
+            window_count = 0
             for page in range(1, max_pages + 1):
-                params = {"type": "json", "inqryDiv": "1", "inqryBgnDt": window_start.strftime("%Y%m%d%H%M"), "inqryEndDt": window_end.strftime("%Y%m%d%H%M"), "numOfRows": 100, "pageNo": page}
+                params = {
+                    "type": "json",
+                    "inqryDiv": "1",
+                    "inqryBgnDt": window_start.strftime("%Y%m%d%H%M"),
+                    "inqryEndDt": window_end.strftime("%Y%m%d%H%M"),
+                    "numOfRows": 100,
+                    "pageNo": page,
+                }
                 try:
                     payload = get_with_retry(f"{base_url}/{operation}?serviceKey={key}", params=params).json()
                 except Exception:
@@ -227,9 +230,11 @@ def g2b() -> list[Notice]:
                     )
                     notice.unique_key = unique_key(notice)
                     out.append(notice)
+                    window_count += 1
                 total_count = int(body.get("totalCount") or 0)
                 if page * 100 >= total_count or len(items) < 100:
                     break
+            log.info("G2B kind=%s period=%s~%s collected=%s", kind, window_start.date(), window_end.date(), window_count)
     log.info("G2B collected=%s", len(out))
     return out
 
@@ -319,7 +324,6 @@ def build_properties(notice: Notice) -> dict:
         "공고 유형": select_property(notice.notice_type),
         "공고번호": rich_text(notice.bid_number),
         "공고일": date_property(notice.published_at),
-        "담당자": {"people": []},
         "발주기관": rich_text(notice.organization),
         "분야": multi_select_property(notice.fields),
         "사업예산": number_property(notice.budget),
@@ -345,11 +349,24 @@ def text_from_property(props: dict, prop_name: str, container: str) -> str:
     return "".join(part.get("plain_text", part.get("text", {}).get("content", "")) for part in parts)
 
 
+def update_or_create_notice(notice: Notice, token: str, data_source_id: str, existing_by_bid: dict[str, str], existing_by_fallback: dict[tuple[str, str, str], str]):
+    properties = build_properties(notice)
+    page_id = existing_by_bid.get(notice.bid_number) if notice.bid_number else None
+    if page_id is None:
+        page_id = existing_by_fallback.get((clean(notice.organization), clean(notice.title), notice.deadline or ""))
+    if page_id:
+        notion_request("PATCH", f"/pages/{page_id}", token, json={"properties": properties})
+        return "updated"
+    notion_request("POST", "/pages", token, json={"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties})
+    return "created"
+
+
 def notion_sync(changes: list[Notice]) -> None:
     token = os.getenv("NOTION_TOKEN", "").strip()
     if not token:
         raise RuntimeError("NOTION_TOKEN is required for live sync")
     data_source_id = notion_data_source_id()
+
     pages = []
     cursor = None
     while True:
@@ -361,9 +378,10 @@ def notion_sync(changes: list[Notice]) -> None:
         if not data.get("has_more"):
             break
         cursor = data.get("next_cursor")
+    log.info("NOTION existing_pages=%s", len(pages))
 
-    existing_by_bid = {}
-    existing_by_fallback = {}
+    existing_by_bid: dict[str, str] = {}
+    existing_by_fallback: dict[tuple[str, str, str], str] = {}
     for page in pages:
         props = page.get("properties", {})
         bid_number = text_from_property(props, "공고번호", "rich_text")
@@ -376,16 +394,25 @@ def notion_sync(changes: list[Notice]) -> None:
         if title:
             existing_by_fallback[(clean(organization), clean(title), deadline)] = page["id"]
 
-    for notice in changes:
-        properties = build_properties(notice)
-        page_id = existing_by_bid.get(notice.bid_number) if notice.bid_number else None
-        if page_id is None:
-            page_id = existing_by_fallback.get((clean(notice.organization), clean(notice.title), notice.deadline or ""))
-        if page_id:
-            notion_request("PATCH", f"/pages/{page_id}", token, json={"properties": properties})
-        else:
-            notion_request("POST", "/pages", token, json={"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties})
-    log.info("Notion synced=%s", len(changes))
+    workers = max(1, min(3, int(os.getenv("NOTION_WORKERS", "3"))))
+    created = 0
+    updated = 0
+    failed = 0
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(update_or_create_notice, notice, token, data_source_id, existing_by_bid, existing_by_fallback) for notice in changes]
+        for index, future in enumerate(as_completed(futures), 1):
+            try:
+                result = future.result()
+                if result == "created":
+                    created += 1
+                else:
+                    updated += 1
+            except Exception:
+                failed += 1
+                log.exception("Notion sync failed for item %s/%s", index, len(futures))
+    log.info("NOTION sync complete created=%s updated=%s failed=%s", created, updated, failed)
+    if failed:
+        raise RuntimeError(f"Notion sync failed for {failed} item(s)")
 
 
 def notify(changes: list[Notice]) -> None:
@@ -405,16 +432,23 @@ def notify(changes: list[Notice]) -> None:
 
 
 def main():
-    live = os.getenv("DRY_RUN", "true").lower() not in {"1", "true", "yes", "on"}
+    mode = os.getenv("RUN_MODE", "daily").strip().lower()
+    live = os.getenv("DRY_RUN", "false").lower() not in {"1", "true", "yes", "on"}
+    log.info("START mode=%s live=%s", mode, live)
+    log.info("G2B window=%s", [(a.strftime("%Y-%m-%d"), b.strftime("%Y-%m-%d")) for a, b in g2b_windows()])
+
     all_notices: list[Notice] = []
     for name, collector in [("G2B", g2b), ("BIZINFO", bizinfo)]:
         try:
-            all_notices.extend(collector())
+            collected = collector()
+            all_notices.extend(collected)
         except Exception:
             log.exception("%s failed", name)
 
-    relevant = []
-    seen = set()
+    log.info("STAGE1 collected=%s", len(all_notices))
+
+    relevant: list[Notice] = []
+    seen: set[str] = set()
     for notice in all_notices:
         if not is_relevant(notice):
             continue
@@ -424,15 +458,22 @@ def main():
         seen.add(notice.unique_key)
         relevant.append(notice)
 
+    direct = sum(1 for n in relevant if n.relevance == "직접")
+    related = sum(1 for n in relevant if n.relevance == "관련")
+    log.info("STAGE2 relevant=%s direct=%s related=%s removed=%s", len(relevant), direct, related, len(all_notices) - len(relevant))
+
     if not live:
-        print("=== DRY RUN ===")
-        for notice in sorted(relevant, key=lambda n: (n.deadline or "9999-99-99", n.relevance, -len(n.discovered_keywords or []))):
+        log.info("DRY_RUN=true; Notion sync skipped")
+        sample_limit = int(os.getenv("DRY_RUN_SAMPLE", "30"))
+        for notice in sorted(relevant, key=lambda n: (0 if n.relevance == "직접" else 1, n.deadline or "9999-99-99"))[:sample_limit]:
             print(json.dumps({"type": notice.notice_type, "title": notice.title, "organization": notice.organization, "fields": notice.fields, "budget": notice.budget, "deadline": notice.deadline, "bid_number": notice.bid_number, "url": notice.url, "discovered_keywords": notice.discovered_keywords, "relevance": notice.relevance, "source": notice.source}, ensure_ascii=False))
-        log.info("DRY_RUN relevant=%s", len(relevant))
+        log.info("STAGE3 dry_run_sample=%s", min(sample_limit, len(relevant)))
         return
 
+    log.info("STAGE3 Notion sync starting items=%s", len(relevant))
     notion_sync(relevant)
     notify(relevant)
+    log.info("DONE synced=%s", len(relevant))
 
 
 if __name__ == "__main__":
