@@ -17,7 +17,7 @@ on:
       DRY_RUN:
         description: "Notion에 실제 반영하지 않고 결과만 확인"
         required: true
-        default: false
+        default: true
         type: boolean
       LOOKBACK_DAYS:
         description: "daily 모드 조회 기간(일)"
@@ -36,17 +36,19 @@ permissions:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       TZ: Asia/Seoul
       RUN_MODE: ${{ inputs.RUN_MODE || 'daily' }}
-      DRY_RUN: ${{ inputs.DRY_RUN || 'false' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.DRY_RUN || 'false' }}
       LOOKBACK_DAYS: ${{ inputs.LOOKBACK_DAYS || '3' }}
       MAX_PAGES: ${{ inputs.MAX_PAGES || '10' }}
       TARGET_YEAR: "2026"
       LOG_LEVEL: INFO
       NOTION_WORKERS: "3"
       DRY_RUN_SAMPLE: "30"
+      G2B_KINDS: "용역,공사,물품"
+      ALLOW_G2B_OFF_HOURS: "false"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
       NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
