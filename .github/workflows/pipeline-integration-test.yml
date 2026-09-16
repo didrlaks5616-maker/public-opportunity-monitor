@@ -45,5 +45,6 @@ jobs:
       - name: Verify final service-only pipeline configuration
         run: |
           echo "Final integration test: G2B_KINDS=$G2B_KINDS"
+          test "$G2B_KINDS" = "용역"
       - name: Run limited live pipeline for services only
         run: python run_monitor.py
