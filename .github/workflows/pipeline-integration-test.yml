@@ -13,7 +13,7 @@ permissions:
 jobs:
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       TZ: Asia/Seoul
       RUN_MODE: daily
@@ -24,7 +24,7 @@ jobs:
       LOG_LEVEL: INFO
       NOTION_WORKERS: "2"
       DRY_RUN_SAMPLE: "10"
-      G2B_KINDS: "용역"
+      G2B_KINDS: "용역,공사,물품"
       ALLOW_G2B_OFF_HOURS: "true"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
@@ -42,5 +42,5 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Run limited live pipeline
+      - name: Run limited live pipeline across all G2B operation types
         run: python run_monitor.py
