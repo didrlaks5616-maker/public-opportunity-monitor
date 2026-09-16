@@ -1,0 +1,3 @@
+# Install with `crontab -e` after replacing `/path/to/repository` with the real clone path.
+# The server should use Asia/Seoul timezone. Keep this path exact and do not use a placeholder in the installed cron.
+0 9 * * * flock -n /tmp/public-opportunity-monitor.lock /path/to/repository/run.sh >> /path/to/repository/logs/cron.log 2>&1

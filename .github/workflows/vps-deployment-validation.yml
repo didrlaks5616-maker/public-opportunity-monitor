@@ -1,0 +1,47 @@
+name: VPS Deployment Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "run.sh"
+      - "run_monitor.py"
+      - ".env.example"
+      - "scripts/**"
+      - "deploy/**"
+      - "VPS_DEPLOYMENT.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Python syntax
+        run: python -m compileall -q main.py run_monitor.py scripts/api_smoke_test.py
+      - name: Shell syntax
+        run: bash -n run.sh scripts/setup_vps.sh scripts/network_check.sh
+      - name: Validate production config
+        env:
+          G2B_KINDS: 용역
+        run: |
+          test "$G2B_KINDS" = "용역"
+          test -f .env.example
+          grep -q '^G2B_SERVICE_KEY=' .env.example
+          grep -q '^BIZINFO_API_KEY=' .env.example
+          grep -q '^NOTION_TOKEN=' .env.example
+          grep -q '^NOTION_DATABASE_ID=' .env.example
+          grep -q '^NOTION_DATA_SOURCE_ID=' .env.example
+          ! grep -R -n -E 'secret_[A-Za-z0-9]+|ntn_[A-Za-z0-9]+|BEGIN [A-Z ]+PRIVATE KEY|G2B_SERVICE_KEY=[^[:space:]]+|BIZINFO_API_KEY=[^[:space:]]+|NOTION_TOKEN=[^[:space:]]+' . --exclude-dir=.git --exclude='.env.example'
+      - name: Verify scripts do not print secrets
+        run: |
+          ! grep -R -n -E 'echo .*G2B_SERVICE_KEY|echo .*BIZINFO_API_KEY|echo .*NOTION_TOKEN' run.sh scripts .github/workflows
