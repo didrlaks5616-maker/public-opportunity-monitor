@@ -35,20 +35,11 @@ CATEGORY_KEYWORDS = {
     "제작": "제작 콘텐츠제작 영상제작 홍보물 인쇄물 홍보영상 브랜드영상 사진촬영 제작대행".split(),
     "홍보": "홍보 홍보대행 홍보용역 정책홍보 광고 광고대행 SNS SNS운영 SNS콘텐츠 유튜브 인스타그램 블로그 콘텐츠 홍보콘텐츠".split(),
 }
-REGION_KEYWORDS = {
-    "서울": ["서울", "서울특별시"], "경기": ["경기", "경기도"], "인천": ["인천", "인천광역시"],
-    "부산": ["부산", "부산광역시"], "대구": ["대구", "대구광역시"], "광주": ["광주", "광주광역시"],
-    "대전": ["대전", "대전광역시"], "울산": ["울산", "울산광역시"], "세종": ["세종", "세종특별자치시"],
-    "강원": ["강원", "강원특별자치도"], "충북": ["충북", "충청북도"], "충남": ["충남", "충청남도"],
-    "전북": ["전북", "전라북도", "전북특별자치도"], "전남": ["전남", "전라남도"],
-    "경북": ["경북", "경상북도"], "경남": ["경남", "경상남도"], "제주": ["제주", "제주특별자치도"],
-}
 
 G2B_OPERATIONS = {
     "용역": "getBidPblancListInfoServc",
     "공사": "getBidPblancListInfoCnstwk",
     "물품": "getBidPblancListInfoThng",
-    "외자": "getBidPblancListInfoFrgcpt",
 }
 
 @dataclass
@@ -56,7 +47,6 @@ class Notice:
     title: str
     organization: str = ""
     notice_type: str = "지원사업"
-    region: str = "전국"
     fields: list[str] | None = None
     budget: float | None = None
     deadline: str = ""
@@ -64,14 +54,17 @@ class Notice:
     url: str = ""
     source: str = ""
     bid_number: str = ""
-    memo: str = ""
-    content_hash: str = ""
-    unique_key: str = ""
+    discovered_keywords: list[str] | None = None
+    relevance: str = "관련"
     status: str = "신규"
+    raw_text: str = ""
+    unique_key: str = ""
 
     def __post_init__(self):
         if self.fields is None:
             self.fields = []
+        if self.discovered_keywords is None:
+            self.discovered_keywords = []
 
 
 def clean(value) -> str:
@@ -88,16 +81,7 @@ def parse_budget(value) -> float | None:
     text = clean(value).replace(",", "")
     if not text:
         return None
-    unit_map = {
-        "억원": 100_000_000, "억": 100_000_000,
-        "천만원": 10_000_000, "천만": 10_000_000,
-        "백만원": 1_000_000, "백만": 1_000_000,
-        "만원": 10_000, "만": 10_000, "원": 1,
-    }
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(억원|억|천만원|천만|백만원|백만|만원|만|원)", text)
-    if match:
-        return float(match.group(1)) * unit_map[match.group(2)]
-    numeric = re.search(r"\d+(?:\.\d+)?", text)
+    numeric = re.search(r"-?\d+(?:\.\d+)?", text)
     return float(numeric.group(0)) if numeric else None
 
 
@@ -105,62 +89,57 @@ def hash_text(value: str) -> str:
     return hashlib.sha256(clean(value).encode("utf-8")).hexdigest()
 
 
-def unique_key(notice: Notice) -> str:
-    return "|".join([
-        notice.source,
-        notice.bid_number or "",
-        clean(notice.organization),
-        clean(notice.title),
-        notice.deadline or "",
-    ])
-
-
-def classify_region(text: str) -> str:
-    normalized = clean(text)
-    for region, terms in REGION_KEYWORDS.items():
-        if any(term in normalized for term in terms):
-            return region
-    return "전국"
-
-
 def classify_fields(text: str) -> list[str]:
-    normalized = text.lower()
-    matched = []
-    for field, terms in CATEGORY_KEYWORDS.items():
-        if any(term.lower() in normalized for term in terms):
-            matched.append(field)
-    return matched
+    normalized = clean(text).lower()
+    return [field for field, terms in CATEGORY_KEYWORDS.items() if any(term.lower() in normalized for term in terms)]
 
 
-def relevance_score(notice: Notice) -> tuple[int, list[str]]:
-    text = (notice.title + " " + notice.organization + " " + notice.memo).lower()
-    hits = [k for k in KEYWORDS if k.lower() in text]
-    score = min(100, len(hits) * 4)
-    if notice.notice_type in {"입찰", "용역", "공사"} and any(t.lower() in text for t in BID_TERMS):
+def score_and_keywords(notice: Notice) -> tuple[int, list[str]]:
+    text = clean(f"{notice.title} {notice.organization} {notice.raw_text}").lower()
+    hits = []
+    for keyword in KEYWORDS:
+        if keyword.lower() in text and keyword not in hits:
+            hits.append(keyword)
+    score = min(60, len(hits) * 4)
+    if notice.notice_type in {"입찰", "용역"} and any(term.lower() in text for term in BID_TERMS):
         score += 20
-    for left, right in [
-        ("홍보", "용역"), ("마케팅", "용역"), ("행사", "운영"), ("축제", "대행"),
-        ("SNS", "운영"), ("영상", "제작"), ("광고", "대행"), ("콘텐츠", "제작"),
-        ("박람회", "운영"), ("홍보관", "운영"), ("팝업스토어", "운영"),
-    ]:
+    for left, right in [("홍보", "용역"), ("마케팅", "용역"), ("행사", "운영"), ("축제", "대행"), ("영상", "제작"), ("광고", "대행"), ("콘텐츠", "제작"), ("전시", "운영"), ("팝업스토어", "운영")]:
         if left.lower() in text and right.lower() in text:
             score += 10
-    return score, hits
+    return score, hits[:20]
+
+
+def set_relevance(notice: Notice) -> None:
+    score, hits = score_and_keywords(notice)
+    notice.discovered_keywords = hits
+    title_lower = notice.title.lower()
+    hard_excluded = any(word.lower() in title_lower for word in EXCLUDE)
+    if hard_excluded and notice.notice_type == "지원사업":
+        notice.relevance = "제외"
+    elif score >= 30:
+        notice.relevance = "직접"
+    elif score >= 12:
+        notice.relevance = "관련"
+    else:
+        notice.relevance = "낮음"
 
 
 def is_relevant(notice: Notice) -> bool:
-    text = (notice.title + " " + notice.organization + " " + notice.memo).lower()
-    score, _ = relevance_score(notice)
-    mixed = any(k in text for k in [
-        "홍보", "마케팅", "행사", "축제", "콘텐츠", "광고", "전시", "박람회",
-        "브랜드", "sns", "공간", "인테리어", "디자인",
-    ])
-    hard_excluded = any(x.lower() in notice.title.lower() for x in EXCLUDE)
-    return (score >= 8 or mixed) and (not hard_excluded or (mixed and notice.notice_type in {"입찰", "용역", "공사"}))
+    set_relevance(notice)
+    if notice.relevance == "제외":
+        return False
+    text = clean(f"{notice.title} {notice.organization} {notice.raw_text}").lower()
+    mixed = any(k in text for k in ["홍보", "마케팅", "행사", "축제", "콘텐츠", "광고", "전시", "박람회", "브랜드", "sns", "공간", "인테리어", "디자인", "실내건축", "리모델링"])
+    return notice.relevance in {"직접", "관련"} or mixed
+
+
+def unique_key(notice: Notice) -> str:
+    if notice.bid_number:
+        return f"{notice.source}|{notice.bid_number}"
+    return "|".join([notice.source, clean(notice.organization), clean(notice.title), notice.deadline or ""])
 
 
 def get_with_retry(url, params=None, attempts=4):
-    last_error = None
     for attempt in range(1, attempts + 1):
         try:
             response = requests.get(url, params=params, timeout=(15, 60))
@@ -168,40 +147,32 @@ def get_with_retry(url, params=None, attempts=4):
                 raise requests.exceptions.HTTPError(f"temporary HTTP {response.status_code}", response=response)
             response.raise_for_status()
             return response
-        except (
-            requests.exceptions.ConnectTimeout,
-            requests.exceptions.ReadTimeout,
-            requests.exceptions.ConnectionError,
-            requests.exceptions.HTTPError,
-        ) as exc:
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status is not None and status not in {429, 500, 502, 503, 504}:
                 raise
-            last_error = exc
             if attempt == attempts:
                 raise
             wait = 5 * (2 ** (attempt - 1))
-            log.warning("temporary network error %s/%s: %s - retry in %ss", attempt, attempts, exc, wait)
+            log.warning("request retry %s/%s: %s", attempt, attempts, exc)
             time.sleep(wait)
-    raise last_error
+    raise RuntimeError("unreachable")
 
 
 def g2b_windows() -> list[tuple[datetime, datetime]]:
-    target_year = os.getenv("TARGET_YEAR", "").strip()
-    now = datetime.now()
+    target_year = os.getenv("TARGET_YEAR", "2026").strip()
+    now = datetime.now(KST).replace(tzinfo=None)
     if target_year.isdigit() and len(target_year) == 4:
         start = datetime(int(target_year), 1, 1)
     else:
-        start = now - timedelta(days=int(os.getenv("LOOKBACK_DAYS", "3")))
+        start = now - timedelta(days=int(os.getenv("LOOKBACK_DAYS", "7")))
     if start > now:
-        start = now - timedelta(days=3)
-
+        start = now - timedelta(days=7)
     windows = []
     cursor = start
     while cursor <= now:
         next_month = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
-        window_end = min(now, next_month - timedelta(minutes=1))
-        windows.append((cursor, window_end))
+        windows.append((cursor, min(now, next_month - timedelta(minutes=1))))
         cursor = next_month
     return windows
 
@@ -209,89 +180,64 @@ def g2b_windows() -> list[tuple[datetime, datetime]]:
 def g2b() -> list[Notice]:
     key = os.getenv("G2B_SERVICE_KEY", "").strip()
     if not key:
+        log.warning("G2B_SERVICE_KEY is missing")
         return []
-
     base_url = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-    max_pages = int(os.getenv("MAX_PAGES", "20"))
+    max_pages = int(os.getenv("MAX_PAGES", "10"))
+    kinds = [x.strip() for x in os.getenv("G2B_KINDS", "용역,공사,물품").split(",") if x.strip() in G2B_OPERATIONS]
     out: list[Notice] = []
-
-    windows = g2b_windows()
-    log.info("G2B crawl windows=%s operations=%s", len(windows), ",".join(G2B_OPERATIONS.keys()))
-
-    for kind, operation in G2B_OPERATIONS.items():
-        url = f"{base_url}/{operation}"
-        for window_start, window_end in windows:
-            window_count = 0
+    for kind in kinds:
+        operation = G2B_OPERATIONS[kind]
+        for window_start, window_end in g2b_windows():
             for page in range(1, max_pages + 1):
-                params = {
-                    "type": "json",
-                    "inqryDiv": "1",
-                    "inqryBgnDt": window_start.strftime("%Y%m%d%H%M"),
-                    "inqryEndDt": window_end.strftime("%Y%m%d%H%M"),
-                    "numOfRows": 100,
-                    "pageNo": page,
-                }
+                params = {"type": "json", "inqryDiv": "1", "inqryBgnDt": window_start.strftime("%Y%m%d%H%M"), "inqryEndDt": window_end.strftime("%Y%m%d%H%M"), "numOfRows": 100, "pageNo": page}
                 try:
-                    response = get_with_retry(f"{url}?serviceKey={key}", params=params)
-                    payload = response.json()
+                    payload = get_with_retry(f"{base_url}/{operation}?serviceKey={key}", params=params).json()
                 except Exception:
-                    log.exception("G2B request failed kind=%s period=%s~%s page=%s", kind, window_start.date(), window_end.date(), page)
+                    log.exception("G2B request failed kind=%s page=%s", kind, page)
                     break
-
-                response_body = payload.get("response", {}).get("body", {})
-                response_header = payload.get("response", {}).get("header", {})
-                result_code = clean(response_header.get("resultCode"))
-                result_msg = clean(response_header.get("resultMsg"))
-                if result_code and result_code not in {"00", "0"}:
-                    log.warning("G2B API result kind=%s code=%s msg=%s", kind, result_code, result_msg)
+                header = payload.get("response", {}).get("header", {})
+                body = payload.get("response", {}).get("body", {})
+                if clean(header.get("resultCode")) not in {"", "00", "0"}:
+                    log.warning("G2B result error kind=%s code=%s msg=%s", kind, header.get("resultCode"), header.get("resultMsg"))
                     break
-
-                items = response_body.get("items") or []
+                items = body.get("items") or []
                 items = items.get("item") if isinstance(items, dict) else items
                 if not items:
                     break
-
                 if isinstance(items, dict):
                     items = [items]
-
                 for item in items:
                     title = clean(item.get("bidNtceNm"))
                     if not title:
                         continue
                     raw = " | ".join(f"{k}:{v}" for k, v in item.items() if v not in (None, ""))
-                    organization = clean(item.get("ntceInsttNm") or item.get("dminsttNm"))
-                    text = f"{title} {organization} {raw}"
                     notice = Notice(
                         title=title,
-                        organization=organization,
-                        notice_type=kind if kind in {"용역", "공사"} else "입찰",
-                        region=classify_region(text),
-                        fields=classify_fields(text),
-                        budget=parse_budget(item.get("presmptPrce") or item.get("bdgtAmt") or item.get("asignBdgtAmt")),
+                        organization=clean(item.get("ntceInsttNm") or item.get("dminsttNm")),
+                        notice_type="용역" if kind == "용역" else "입찰",
+                        fields=classify_fields(f"{title} {raw}"),
+                        budget=parse_budget(item.get("asignBdgtAmt") or item.get("bdgtAmt") or item.get("presmptPrce")),
                         deadline=parse_date(item.get("bidClseDt") or item.get("bidNtceEndDt")),
                         published_at=parse_date(item.get("bidNtceDt") or item.get("ntceDt")),
                         url=clean(item.get("bidNtceDtlUrl") or item.get("bidNtceUrl")),
-                        source="G2B",
+                        source="나라장터",
                         bid_number=clean(item.get("bidNtceNo")),
-                        memo=raw,
+                        raw_text=raw,
                     )
-                    notice.content_hash = hash_text(raw)
                     notice.unique_key = unique_key(notice)
                     out.append(notice)
-                    window_count += 1
-
-                total_count = int(response_body.get("totalCount") or 0)
+                total_count = int(body.get("totalCount") or 0)
                 if page * 100 >= total_count or len(items) < 100:
                     break
-
-            log.info("G2B kind=%s period=%s~%s collected=%s", kind, window_start.date(), window_end.date(), window_count)
-
+    log.info("G2B collected=%s", len(out))
     return out
 
 
 def bizinfo() -> list[Notice]:
     key = os.getenv("BIZINFO_API_KEY", "").strip()
     if not key:
+        log.warning("BIZINFO_API_KEY is missing")
         return []
     url = os.getenv("BIZINFO_API_URL", "https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do")
     response = get_with_retry(url, params={"crtfcKey": key, "dataType": "json", "searchCnt": 100})
@@ -304,51 +250,47 @@ def bizinfo() -> list[Notice]:
         title = clean(item.get("pblancNm") or item.get("title") or item.get("사업명"))
         if not title:
             continue
-        raw = " | ".join(f"{k}:{v}" for k, v in item.items() if v not in (None, ""))
-        organization = clean(item.get("jrsdInsttNm") or item.get("organization"))
         description = clean(item.get("bsnsSumryCn") or item.get("description"))
-        text = f"{title} {organization} {description} {raw}"
+        raw = " | ".join(f"{k}:{v}" for k, v in item.items() if v not in (None, ""))
         notice = Notice(
             title=title,
-            organization=organization,
+            organization=clean(item.get("jrsdInsttNm") or item.get("organization")),
             notice_type="지원사업",
-            region=classify_region(text),
-            fields=classify_fields(text),
+            fields=classify_fields(f"{title} {description} {raw}"),
             budget=parse_budget(item.get("suptAmt") or item.get("budget")),
             deadline=parse_date(item.get("reqstEndDe") or item.get("requestEndDate")),
             published_at=parse_date(item.get("creatPnttm") or item.get("pblancBeginDe")),
             url=clean(item.get("pblancUrl") or item.get("detailUrl") or item.get("url")),
-            source="BIZINFO",
-            memo=description,
+            source="기업마당",
+            raw_text=description,
         )
-        notice.content_hash = hash_text(raw)
         notice.unique_key = unique_key(notice)
         out.append(notice)
+    log.info("BIZINFO collected=%s", len(out))
     return out
 
 
 def notion_request(method, path, token, **kwargs):
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Notion-Version": os.getenv("NOTION_VERSION", "2026-03-11"),
-        "Content-Type": "application/json",
-    }
-    last_response = None
+    headers = {"Authorization": f"Bearer {token}", "Notion-Version": os.getenv("NOTION_VERSION", "2026-03-11"), "Content-Type": "application/json"}
     for attempt in range(4):
         response = requests.request(method, "https://api.notion.com/v1" + path, headers=headers, timeout=30, **kwargs)
-        last_response = response
         if response.status_code == 429 or response.status_code >= 500:
+            if attempt == 3:
+                response.raise_for_status()
             time.sleep(min(2 * (attempt + 1), 10))
             continue
         response.raise_for_status()
         return response
-    last_response.raise_for_status()
-    return last_response
+    raise RuntimeError("Notion request failed")
 
 
 def rich_text(value: str) -> dict:
     value = clean(value)
     return {"rich_text": [{"type": "text", "text": {"content": value[:2000]}}]} if value else {"rich_text": []}
+
+
+def title_property(value: str) -> dict:
+    return {"title": [{"type": "text", "text": {"content": clean(value)[:2000]}}]}
 
 
 def date_property(value: str) -> dict:
@@ -373,18 +315,21 @@ def number_property(value: float | None) -> dict:
 
 def build_properties(notice: Notice) -> dict:
     return {
-        "공고명": {"title": [{"type": "text", "text": {"content": notice.title[:2000]}}]},
+        "공고명": title_property(notice.title),
         "공고 유형": select_property(notice.notice_type),
-        "분야": multi_select_property(notice.fields),
-        "발주기관": rich_text(notice.organization),
-        "지역": select_property(notice.region),
         "공고번호": rich_text(notice.bid_number),
         "공고일": date_property(notice.published_at),
-        "접수 마감일": date_property(notice.deadline),
+        "담당자": {"people": []},
+        "발주기관": rich_text(notice.organization),
+        "분야": multi_select_property(notice.fields),
         "사업예산": number_property(notice.budget),
+        "접수 마감일": date_property(notice.deadline),
         "공고 URL": url_property(notice.url),
         "진행상태": select_property(notice.status),
-        "메모": rich_text(notice.memo),
+        "발견키워드": rich_text(", ".join(notice.discovered_keywords or [])),
+        "관련도": select_property(notice.relevance),
+        "최종확인일": date_property(datetime.now(KST).date().isoformat()),
+        "수집원": select_property(notice.source),
     }
 
 
@@ -402,10 +347,9 @@ def text_from_property(props: dict, prop_name: str, container: str) -> str:
 
 def notion_sync(changes: list[Notice]) -> None:
     token = os.getenv("NOTION_TOKEN", "").strip()
-    data_source_id = notion_data_source_id()
     if not token:
         raise RuntimeError("NOTION_TOKEN is required for live sync")
-
+    data_source_id = notion_data_source_id()
     pages = []
     cursor = None
     while True:
@@ -418,53 +362,45 @@ def notion_sync(changes: list[Notice]) -> None:
             break
         cursor = data.get("next_cursor")
 
-    existing = {}
+    existing_by_bid = {}
+    existing_by_fallback = {}
     for page in pages:
         props = page.get("properties", {})
+        bid_number = text_from_property(props, "공고번호", "rich_text")
         title = text_from_property(props, "공고명", "title")
         organization = text_from_property(props, "발주기관", "rich_text")
-        date_data = props.get("접수 마감일", {}).get("date") or {}
-        deadline = date_data.get("start", "") if date_data else ""
+        deadline_data = props.get("접수 마감일", {}).get("date") or {}
+        deadline = deadline_data.get("start", "") if deadline_data else ""
+        if bid_number:
+            existing_by_bid[bid_number] = page["id"]
         if title:
-            existing["|".join([clean(organization), clean(title), deadline])] = page["id"]
+            existing_by_fallback[(clean(organization), clean(title), deadline)] = page["id"]
 
     for notice in changes:
-        key = "|".join([clean(notice.organization), clean(notice.title), notice.deadline or ""])
         properties = build_properties(notice)
-        if key in existing:
-            notion_request("PATCH", f"/pages/{existing[key]}", token, json={"properties": properties})
+        page_id = existing_by_bid.get(notice.bid_number) if notice.bid_number else None
+        if page_id is None:
+            page_id = existing_by_fallback.get((clean(notice.organization), clean(notice.title), notice.deadline or ""))
+        if page_id:
+            notion_request("PATCH", f"/pages/{page_id}", token, json={"properties": properties})
         else:
-            notion_request("POST", "/pages", token, json={
-                "parent": {"type": "data_source_id", "data_source_id": data_source_id},
-                "properties": properties,
-            })
+            notion_request("POST", "/pages", token, json={"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties})
+    log.info("Notion synced=%s", len(changes))
 
 
 def notify(changes: list[Notice]) -> None:
     if not changes or not os.getenv("NOTIFICATION_TYPE"):
         return
+    ranked = sorted(changes, key=lambda n: (0 if n.relevance == "직접" else 1, n.deadline or "9999-99-99"))[:30]
     lines = [f"[{datetime.now(KST):%Y-%m-%d} 공공사업·입찰] 신규/수정 {len(changes)}건"]
-    ranked = sorted(changes, key=lambda n: (-relevance_score(n)[0], n.deadline or "9999-99-99"))[:30]
     for notice in ranked:
         budget_text = f"{int(notice.budget):,}원" if notice.budget is not None else "-"
-        lines.append(
-            f"[{notice.status}] {notice.title}\n"
-            f"기관: {notice.organization}\n"
-            f"분야: {', '.join(notice.fields or []) or '-'}\n"
-            f"지역: {notice.region}\n"
-            f"예산: {budget_text}\n"
-            f"마감: {notice.deadline or '-'}\n"
-            f"{notice.url}"
-        )
+        lines.append(f"[{notice.relevance}] {notice.title}\n기관: {notice.organization}\n분야: {', '.join(notice.fields or []) or '-'}\n예산: {budget_text}\n마감: {notice.deadline or '-'}\n{notice.url}")
     body = "\n\n".join(lines)
-    notification_type = os.getenv("NOTIFICATION_TYPE", "").lower()
-    if notification_type == "telegram" and os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
-        requests.post(
-            f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
-            json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": body[:4000]},
-            timeout=30,
-        ).raise_for_status()
-    elif notification_type == "slack" and os.getenv("SLACK_WEBHOOK_URL"):
+    kind = os.getenv("NOTIFICATION_TYPE", "").lower()
+    if kind == "telegram" and os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
+        requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage", json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": body[:4000]}, timeout=30).raise_for_status()
+    elif kind == "slack" and os.getenv("SLACK_WEBHOOK_URL"):
         requests.post(os.environ["SLACK_WEBHOOK_URL"], json={"text": body[:12000]}, timeout=30).raise_for_status()
 
 
@@ -473,39 +409,30 @@ def main():
     all_notices: list[Notice] = []
     for name, collector in [("G2B", g2b), ("BIZINFO", bizinfo)]:
         try:
-            collected = collector()
-            log.info("%s collected=%s", name, len(collected))
-            all_notices.extend(collected)
-        except Exception as exc:
-            log.exception("%s failed: %s", name, exc)
+            all_notices.extend(collector())
+        except Exception:
+            log.exception("%s failed", name)
 
-    relevant_notices: list[Notice] = []
+    relevant = []
     seen = set()
     for notice in all_notices:
-        if not is_relevant(notice) or notice.unique_key in seen:
+        if not is_relevant(notice):
+            continue
+        notice.unique_key = unique_key(notice)
+        if notice.unique_key in seen:
             continue
         seen.add(notice.unique_key)
-        relevant_notices.append(notice)
+        relevant.append(notice)
 
     if not live:
         print("=== DRY RUN ===")
-        for notice in sorted(relevant_notices, key=lambda n: (n.deadline or "9999-99-99", -relevance_score(n)[0])):
-            print(json.dumps({
-                "status": notice.status,
-                "type": notice.notice_type,
-                "title": notice.title,
-                "organization": notice.organization,
-                "region": notice.region,
-                "fields": notice.fields,
-                "deadline": notice.deadline,
-                "budget": notice.budget,
-                "url": notice.url,
-            }, ensure_ascii=False))
+        for notice in sorted(relevant, key=lambda n: (n.deadline or "9999-99-99", n.relevance, -len(n.discovered_keywords or []))):
+            print(json.dumps({"type": notice.notice_type, "title": notice.title, "organization": notice.organization, "fields": notice.fields, "budget": notice.budget, "deadline": notice.deadline, "bid_number": notice.bid_number, "url": notice.url, "discovered_keywords": notice.discovered_keywords, "relevance": notice.relevance, "source": notice.source}, ensure_ascii=False))
+        log.info("DRY_RUN relevant=%s", len(relevant))
         return
 
-    notion_sync(relevant_notices)
-    notify(relevant_notices)
-    log.info("synced=%s", len(relevant_notices))
+    notion_sync(relevant)
+    notify(relevant)
 
 
 if __name__ == "__main__":
