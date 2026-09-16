@@ -1,0 +1,141 @@
+name: API Diagnostic
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install requests
+        run: python -m pip install "requests>=2.32,<3"
+      - name: Runner network diagnostics
+        run: |
+          set -u
+          echo "runner_os=$RUNNER_OS"
+          echo "runner_arch=$RUNNER_ARCH"
+          echo "public_ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org || echo UNAVAILABLE)"
+          echo "=== DNS ==="
+          for host in apis.data.go.kr www.bizinfo.go.kr; do
+            echo "[$host]"
+            getent ahostsv4 "$host" || true
+          done
+          echo "=== HTTPS HEAD ==="
+          for url in https://apis.data.go.kr https://www.bizinfo.go.kr; do
+            echo "[$url]"
+            curl -4 -sS -I -L --connect-timeout 8 --max-time 15 "$url" 2>&1 | sed -n '1,18p' || true
+          done
+      - name: Real API diagnostics
+        run: |
+          python - <<'PY'
+          import os
+          import socket
+          import time
+          from datetime import datetime, timedelta
+          from urllib.parse import unquote
+          import requests
+
+          G2B_BASE = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+          G2B_OP = "getBidPblancListInfoServc"
+          BIZINFO_URL = "https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do"
+          g2b = os.getenv("G2B_SERVICE_KEY", "").strip()
+          biz = os.getenv("BIZINFO_API_KEY", "").strip()
+
+          def redact(text):
+              text = str(text or "")
+              for secret in (g2b, biz):
+                  if secret:
+                      text = text.replace(secret, "<REDACTED>")
+                      decoded = unquote(secret)
+                      if decoded != secret:
+                          text = text.replace(decoded, "<REDACTED>")
+              return text[:1200]
+
+          print("=== SECRET METADATA ===")
+          for name, key in (("G2B_SERVICE_KEY", g2b), ("BIZINFO_API_KEY", biz)):
+              print(f"{name}: present={bool(key)} length={len(key)} contains_percent={('%' in key) if key else False} decoded_length={len(unquote(key)) if key else 0}")
+
+          print("=== PYTHON DNS ===")
+          for host in ("apis.data.go.kr", "www.bizinfo.go.kr"):
+              try:
+                  addrs = sorted({x[4][0] for x in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
+                  print(host, addrs)
+              except Exception as e:
+                  print(host, "DNS_ERROR", type(e).__name__, str(e))
+
+          def call(label, url, params=None):
+              print(f"=== {label} ===")
+              start = time.time()
+              try:
+                  r = requests.get(url, params=params, timeout=(8, 20))
+                  print("status=", r.status_code, "elapsed=", round(time.time()-start,2), "s")
+                  print("content_type=", r.headers.get("content-type", ""))
+                  print("body_sample=", redact(r.text))
+                  return r
+              except requests.exceptions.ConnectTimeout as e:
+                  print("RESULT=CONNECT_TIMEOUT", type(e).__name__, str(e))
+              except requests.exceptions.SSLError as e:
+                  print("RESULT=TLS_ERROR", type(e).__name__, str(e))
+              except requests.exceptions.ReadTimeout as e:
+                  print("RESULT=READ_TIMEOUT", type(e).__name__, str(e))
+              except requests.exceptions.ConnectionError as e:
+                  print("RESULT=CONNECTION_ERROR", type(e).__name__, str(e))
+              except Exception as e:
+                  print("RESULT=EXCEPTION", type(e).__name__, str(e))
+              return None
+
+          call("G2B HOST", "https://apis.data.go.kr")
+          call("BIZINFO HOST", "https://www.bizinfo.go.kr")
+
+          now = datetime.now()
+          begin = now - timedelta(days=2)
+          common = {
+              "type": "json",
+              "inqryDiv": "1",
+              "inqryBgnDt": begin.strftime("%Y%m%d%H%M"),
+              "inqryEndDt": now.strftime("%Y%m%d%H%M"),
+              "numOfRows": 1,
+              "pageNo": 1,
+          }
+
+          if g2b:
+              candidate = unquote(g2b) if "%" in g2b else g2b
+              r = call("G2B API getBidPblancListInfoServc", f"{G2B_BASE}/{G2B_OP}", {"serviceKey": candidate, **common})
+              if r is not None:
+                  try:
+                      j = r.json(); h = j.get("response", {}).get("header", {}); b = j.get("response", {}).get("body", {})
+                      print("g2b_resultCode=", h.get("resultCode", ""))
+                      print("g2b_resultMsg=", redact(h.get("resultMsg", "")))
+                      print("g2b_totalCount=", b.get("totalCount", "") if isinstance(b, dict) else "")
+                  except Exception as e:
+                      print("g2b_json_parse=", type(e).__name__, str(e))
+          else:
+              print("G2B API SKIPPED: secret missing")
+
+          if biz:
+              r = call("BIZINFO API", BIZINFO_URL, {"crtfcKey": biz, "dataType": "json", "searchCnt": 1})
+              if r is not None:
+                  try:
+                      j = r.json(); root = j.get("jsonArray", {})
+                      print("bizinfo_root_keys=", sorted(root.keys()) if isinstance(root, dict) else [])
+                      if isinstance(root, dict):
+                          items = root.get("item", [])
+                          print("bizinfo_item_count=", len(items) if isinstance(items, list) else (1 if items else 0))
+                  except Exception as e:
+                      print("bizinfo_json_parse=", type(e).__name__, str(e))
+          else:
+              print("BIZINFO API SKIPPED: secret missing")
+          PY
