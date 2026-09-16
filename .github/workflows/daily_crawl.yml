@@ -2,10 +2,33 @@ name: Public Opportunity Monitor
 
 on:
   schedule:
-    # 조달청 Open API 이용 가능시간(18:00~익일 08:30 KST) 안에서 실행
-    # 09:10 UTC = 18:10 KST
+    # 매일 18:10 KST 실행 (09:10 UTC)
     - cron: "10 9 * * *"
   workflow_dispatch:
+    inputs:
+      RUN_MODE:
+        description: "실행 모드"
+        required: true
+        default: "daily"
+        type: choice
+        options:
+          - daily
+          - initial
+      DRY_RUN:
+        description: "Notion에 실제 반영하지 않고 결과만 확인"
+        required: true
+        default: false
+        type: boolean
+      LOOKBACK_DAYS:
+        description: "daily 모드 조회 기간(일)"
+        required: true
+        default: "3"
+        type: string
+      MAX_PAGES:
+        description: "API별 최대 페이지 수(페이지당 100건)"
+        required: true
+        default: "10"
+        type: string
 
 permissions:
   contents: read
@@ -16,12 +39,14 @@ jobs:
     timeout-minutes: 60
     env:
       TZ: Asia/Seoul
-      DRY_RUN: "false"
-      LOOKBACK_DAYS: "258"
-      MAX_PAGES: "10"
+      RUN_MODE: ${{ inputs.RUN_MODE || 'daily' }}
+      DRY_RUN: ${{ inputs.DRY_RUN || 'false' }}
+      LOOKBACK_DAYS: ${{ inputs.LOOKBACK_DAYS || '3' }}
+      MAX_PAGES: ${{ inputs.MAX_PAGES || '10' }}
       TARGET_YEAR: "2026"
-      REQUEST_TIMEOUT: "30"
       LOG_LEVEL: INFO
+      NOTION_WORKERS: "3"
+      DRY_RUN_SAMPLE: "30"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
       NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
@@ -41,5 +66,11 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Show run configuration
+        run: |
+          echo "RUN_MODE=$RUN_MODE"
+          echo "DRY_RUN=$DRY_RUN"
+          echo "LOOKBACK_DAYS=$LOOKBACK_DAYS"
+          echo "MAX_PAGES=$MAX_PAGES"
       - name: Run monitor
         run: python main.py
