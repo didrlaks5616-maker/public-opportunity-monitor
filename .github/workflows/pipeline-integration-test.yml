@@ -22,7 +22,7 @@ jobs:
       MAX_PAGES: "1"
       TARGET_YEAR: "2026"
       LOG_LEVEL: INFO
-      NOTION_WORKERS: "2"
+      NOTION_WORKERS: "1"
       DRY_RUN_SAMPLE: "10"
       G2B_KINDS: "용역,공사,물품"
       ALLOW_G2B_OFF_HOURS: "true"
