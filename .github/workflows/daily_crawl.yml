@@ -2,7 +2,6 @@ name: Public Opportunity Monitor
 
 on:
   schedule:
-    # 매일 18:10 KST 실행 (09:10 UTC)
     - cron: "10 9 * * *"
   workflow_dispatch:
     inputs:
@@ -48,7 +47,7 @@ jobs:
       NOTION_WORKERS: "3"
       DRY_RUN_SAMPLE: "30"
       G2B_KINDS: "용역,공사,물품"
-      ALLOW_G2B_OFF_HOURS: "false"
+      ALLOW_G2B_OFF_HOURS: "true"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
       NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
@@ -74,5 +73,7 @@ jobs:
           echo "DRY_RUN=$DRY_RUN"
           echo "LOOKBACK_DAYS=$LOOKBACK_DAYS"
           echo "MAX_PAGES=$MAX_PAGES"
+          echo "G2B_KINDS=$G2B_KINDS"
+          echo "ALLOW_G2B_OFF_HOURS=$ALLOW_G2B_OFF_HOURS"
       - name: Run monitor
-        run: python main.py
+        run: python run_monitor.py
